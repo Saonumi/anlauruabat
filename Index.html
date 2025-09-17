@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>Hội Ăn Lẩu</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  *{box-sizing:border-box}
+  body{
+    font-family:system-ui, Arial, sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:100vh;margin:0;background:#f3f7fb;
+  }
+  h1{
+    font-size:40px;
+    font-weight:900;
+    color:#06b6d4;
+    margin-bottom:20px;
+    text-shadow:0 4px 10px rgba(0,0,0,0.1);
+  }
+  .container{display:flex;flex-direction:column;align-items:center;gap:14px}
+  canvas{border-radius:50%;box-shadow:0 8px 30px rgba(13,38,59,0.08);background:#fff}
+  button{
+    padding:10px 18px;
+    border-radius:10px;
+    background:#06b6d4;color:#fff;
+    border:none;cursor:pointer;
+    font-size:16px;font-weight:600;
+    box-shadow:0 8px 20px rgba(6,182,212,0.2);
+  }
+  .msg{min-height:26px;color:#222;font-size:18px;font-weight:500}
+  /* --- Mũi tên trên đỉnh --- */
+  .wheel-wrap{position:relative;display:inline-block;}
+  .pointer{
+    position:absolute;
+    top:-30px;
+    left:50%;
+    transform:translateX(-50%);
+    width:0;height:0;
+    border-left:18px solid transparent;
+    border-right:18px solid transparent;
+    border-top:30px solid #111; /* tam giác đen chỉ xuống */
+  }
+  /* Popup thắng cuộc */
+  .overlay{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.65);
+    display:flex;align-items:center;justify-content:center;
+    opacity:0;pointer-events:none;
+    transition:opacity 0.3s ease;
+  }
+  .overlay.show{opacity:1;pointer-events:auto;}
+  .popup{
+    background:#fff;
+    padding:30px 40px;
+    border-radius:16px;
+    text-align:center;
+    max-width:400px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.3);
+    animation:popIn 0.4s ease;
+  }
+  @keyframes popIn{
+    from{transform:scale(0.6);opacity:0;}
+    to{transform:scale(1);opacity:1;}
+  }
+  .popup h2{
+    font-size:32px;
+    color:#e11d48;
+    margin-bottom:14px;
+  }
+  .popup p{
+    font-size:24px;
+    font-weight:700;
+    color:#06b6d4;
+  }
+  .popup button{
+    margin-top:20px;
+    padding:10px 20px;
+    font-size:16px;
+    border:none;
+    background:#06b6d4;
+    color:#fff;
+    border-radius:8px;
+    cursor:pointer;
+  }
+</style>
+</head>
+<body>
+  <h1>THẰNG NÀO RỬA BÁT!!!</h1>
+  <div class="container">
+    <div class="wheel-wrap">
+      <canvas id="wheelCanvas" width="600" height="600"></canvas>
+      <div class="pointer"></div>
+    </div>
+    <button id="spinBtn">Quay mẹ đê!</button>
+    <div class="msg" id="message"></div>
+  </div>
+
+  <!-- Popup -->
+  <div class="overlay" id="overlay">
+    <div class="popup">
+      <h2>THẰNG RỬA BÁT</h2>
+      <p id="winnerName"></p>
+      <button id="closePopup">Đóng</button>
+    </div>
+  </div>
+
+<script>
+const segments = ['LÂM','TÂN','TIẾN MINH','HIẾU','SÁNG'];
+const colors = ['#ffb4b4','#ffd6a5','#fdffb6','#caffbf','#9bf6ff'];
+const desiredIndex = 2; // index 2 trúng
+const canvas = document.getElementById('wheelCanvas');
+const ctx = canvas.getContext('2d');
+const cx = canvas.width/2, cy = canvas.height/2, radius = Math.min(cx,cy)-12;
+const n = segments.length;
+const segAngle = 360 / n;
+
+const spinBtn = document.getElementById('spinBtn');
+const messageEl = document.getElementById('message');
+const overlay = document.getElementById('overlay');
+const winnerName = document.getElementById('winnerName');
+const closePopup = document.getElementById('closePopup');
+
+let audioCtx = null;
+function tickSound(vol=0.06, freq=900){
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  g.gain.value = vol;
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start();
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.06);
+  o.stop(audioCtx.currentTime + 0.07);
+}
+
+let rotation = 0;
+let spinning = false, reversing = false;
+let angularVelocity = 0;
+let deceleration = 400;
+let lastTimestamp = null;
+let lastSector = null;
+
+function drawWheel(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(rotation * Math.PI/180);
+  for(let i=0;i<n;i++){
+    const start = (-Math.PI/2) + i*(2*Math.PI/n);
+    const end = start + (2*Math.PI/n);
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,radius,start,end); ctx.closePath();
+    ctx.fillStyle = colors[i % colors.length]; ctx.fill();
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.save();
+    const mid = start + (end-start)/2;
+    ctx.rotate(mid);
+    ctx.translate(radius*0.68,0);
+    ctx.rotate(Math.PI/2);
+    ctx.fillStyle = '#111'; ctx.font='bold 20px system-ui'; ctx.textAlign='center';
+    ctx.fillText(segments[i],0,0);
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0,0,56,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#ddd'; ctx.lineWidth=2; ctx.stroke();
+  ctx.restore();
+}
+
+function norm(a){ return ((a%360)+360)%360; }
+function angDiff(a,b){ let d = Math.abs(a-b)%360; return d>180?360-d:d; }
+
+function getTopIndex(rot){
+  const r = norm(rot);
+  const pointer = 270;
+  let best = 0, bestD = 1e9;
+  for(let i=0;i<n;i++){
+    const centerBefore = norm(-90 + (i+0.5)*segAngle);
+    const centerAfter = norm(centerBefore + r);
+    const d = angDiff(centerAfter, pointer);
+    if(d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+
+function rotationForIndexAtTop(index){
+  const centerBefore = norm(-90 + (index + 0.5)*segAngle);
+  return norm(270 - centerBefore);
+}
+
+function startSpin(){
+  if(spinning || reversing) return;
+  lastTimestamp = null; spinning = true; messageEl.textContent = '';
+  angularVelocity = 1200 + Math.random()*900;
+  deceleration = 300 + Math.random()*160;
+  lastSector = null;
+  requestAnimationFrame(spinLoop);
+}
+
+function spinLoop(ts){
+  if(!lastTimestamp) lastTimestamp = ts;
+  const dt = (ts - lastTimestamp)/1000; lastTimestamp = ts;
+  if(spinning){
+    rotation += angularVelocity * dt;
+    angularVelocity -= deceleration * dt;
+    const curIndex = getTopIndex(rotation);
+    if(curIndex !== lastSector){ tickSound(0.04, 900 + Math.random()*500); lastSector = curIndex; }
+    if(angularVelocity <= 0){
+      spinning = false; angularVelocity = 0;
+      const landed = getTopIndex(rotation);
+      if(landed === desiredIndex){
+        showWin(segments[landed]);
+        jiggleAndDone();
+      } else {
+        setTimeout(()=> startReverseTo(desiredIndex), 600);
+      }
+    } else {
+      drawWheel(); requestAnimationFrame(spinLoop);
+    }
+  }
+}
+
+function jiggleAndDone(){
+  const amp = 6; const dur = 650; const start = performance.now(); const startRot = rotation;
+  function anim(t){
+    const p = Math.min(1,(t-start)/dur);
+    const ease = 1 - Math.pow(1-p,3);
+    const wiggle = Math.sin(p*8*Math.PI) * (1-p) * amp;
+    rotation = startRot + wiggle;
+    drawWheel();
+    if(p < 1) requestAnimationFrame(anim);
+  }
+  requestAnimationFrame(anim);
+}
+
+function startReverseTo(desiredIndex){
+  if(reversing) return;
+  reversing = true;
+  const currNorm = norm(rotation);
+  const targetNorm = rotationForIndexAtTop(desiredIndex);
+  let deltaBackward = (currNorm - targetNorm + 360) % 360;
+  if(deltaBackward === 0) deltaBackward = 360;
+  const extraSpins = 2 + Math.floor(Math.random()*2);
+  const totalBackward = deltaBackward + extraSpins*360;
+  const targetAbsolute = rotation - totalBackward;
+  const revDuration = 1100 + Math.min(4000, totalBackward * 2.2);
+  const startRot = rotation; const startT = performance.now();
+  function revAnim(t){
+    const p = Math.min(1,(t-startT)/revDuration);
+    const ease = 1 - Math.pow(1-p,3);
+    rotation = startRot + (targetAbsolute - startRot) * ease;
+    const curIdx = getTopIndex(rotation);
+    if(curIdx !== lastSector){ tickSound(0.06, 700); lastSector = curIdx; }
+    drawWheel();
+    if(p < 1) requestAnimationFrame(revAnim);
+    else {
+      reversing = false; rotation = targetAbsolute; drawWheel();
+      const landed = getTopIndex(rotation);
+      showWin(segments[landed]);
+      jiggleAndDone();
+    }
+  }
+  requestAnimationFrame(revAnim);
+}
+
+let winAudio = null;
+function playWinSound(){
+  winAudio = new Audio("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3");
+  winAudio.play();
+}
+
+function showWin(name){
+  // In ra dưới vòng quay
+  messageEl.innerHTML = ` <b style="color:#e11d48;font-size:20px">THẰNG RỬA BÁT LÀ: ${name} !!!!</b>`;
+  
+  // Hiện popup
+  winnerName.textContent = name;
+  overlay.classList.add('show');
+
+  // Phát nhạc
+  playWinSound();
+}
+
+closePopup.addEventListener('click', ()=>{
+  overlay.classList.remove('show');
+  if(winAudio){
+    winAudio.pause();
+    winAudio.currentTime = 0;
+  }
+});
+
+spinBtn.addEventListener('click', ()=> startSpin());
+
+drawWheel();
+</script>
+</body>
+</html>
